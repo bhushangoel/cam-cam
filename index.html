@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Solo Travel Cam Pro</title>
+    <title>Solo Travel Cam</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { overscroll-behavior-y: none; user-select: none; -webkit-user-select: none; }
@@ -14,15 +14,8 @@
 <body class="bg-gray-900 text-white h-screen w-screen overflow-hidden flex flex-col">
 
     <!-- Top Bar -->
-    <div class="flex justify-between items-center p-3 bg-black shadow-md z-20" id="topBar">
-        <div class="text-sm font-bold" id="headerText">Step 1: Back Camera</div>
-        
-        <!-- Resolution Selector -->
-        <select id="resSelect" class="bg-gray-800 text-white text-xs px-2 py-1 rounded border border-gray-600 outline-none">
-            <option value="1080">1080p (FHD)</option>
-            <option value="720">720p (HD)</option>
-            <option value="2160">4K (UHD)</option>
-        </select>
+    <div class="text-center p-4 text-sm font-bold bg-black shadow-md z-20" id="headerText">
+        Step 1: Capture Monument (Back Camera)
     </div>
 
     <!-- Main Workspace -->
@@ -75,7 +68,6 @@
         const toggleShapeBtn = document.getElementById('toggleShapeBtn');
         const saveBtn = document.getElementById('saveBtn');
         const retakeBtn = document.getElementById('retakeBtn');
-        const resSelect = document.getElementById('resSelect');
         const sizeSlider = document.getElementById('sizeSlider');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -84,47 +76,26 @@
         let currentStream = null;
         let step = 1; 
         let isCircle = true;
-        let facingMode = 'environment';
 
-        async function startCamera(mode) {
-            facingMode = mode;
+        // Simple Camera Logic - Removed all resolution constraints
+        async function startCamera(facingMode) {
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
-
-            const res = parseInt(resSelect.value);
-            let constraints = { video: { facingMode: mode }, audio: false };
-            
-            if (res === 2160) { constraints.video.width = { ideal: 3840 }; constraints.video.height = { ideal: 2160 }; }
-            else if (res === 1080) { constraints.video.width = { ideal: 1920 }; constraints.video.height = { ideal: 1080 }; }
-            else { constraints.video.width = { ideal: 1280 }; constraints.video.height = { ideal: 720 }; }
-
             try {
-                // पहले हाई रिज़ॉल्यूशन ट्राई करेगा
-                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode },
+                    audio: false
+                });
+                video.srcObject = currentStream;
+                video.muted = true;
+                video.play().catch(e => console.log(e));
             } catch (err) {
-                console.warn("High Res failed, falling back to default camera...");
-                try {
-                    // अगर हाई रिज़ॉल्यूशन फेल हुआ (iOS में आम है), तो नॉर्मल कैमरा खोल देगा
-                    currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: false });
-                } catch (fallbackErr) {
-                    alert("Camera access denied! Please check settings.");
-                    return;
-                }
+                alert("Camera access denied or failed: " + err.message);
             }
-
-            video.srcObject = currentStream;
-            video.muted = true; // iOS Safari fix
-            
-            // ज़बरदस्ती प्ले करवाना (ताकि ब्लैक स्क्रीन न रहे)
-            video.play().catch(e => console.error("Auto-play prevented", e));
         }
 
-        resSelect.addEventListener('change', () => {
-            if (step === 1) startCamera('environment');
-        });
-
-        // App Start
+        // Initialize directly with Back Camera
         startCamera('environment');
 
         captureBtn.addEventListener('click', () => {
@@ -137,5 +108,170 @@
             if (step === 1) {
                 bgImage.src = imageDataUrl;
                 step = 2;
-                headerText.innerText = "Step 2: Front Camera";
-                resSelect.classList.add('hidden');
+                headerText.innerText = "Step 2: Capture Selfie (Front Camera)";
+                startCamera('user');
+            } else if (step === 2) {
+                overlayImage.src = imageDataUrl;
+                step = 3;
+                
+                if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+                
+                video.classList.add('hidden');
+                captureBtn.classList.add('hidden');
+                editorView.classList.remove('hidden');
+                editorControls.classList.remove('hidden');
+                headerText.innerText = "Step 3: Adjust & Save";
+            }
+        });
+
+        retakeBtn.addEventListener('click', () => {
+            step = 1;
+            editorView.classList.add('hidden');
+            editorControls.classList.add('hidden');
+            video.classList.remove('hidden');
+            captureBtn.classList.remove('hidden');
+            headerText.innerText = "Step 1: Capture Monument (Back Camera)";
+            startCamera('environment');
+        });
+
+        toggleShapeBtn.addEventListener('click', () => {
+            isCircle = !isCircle;
+            if (isCircle) {
+                overlayContainer.classList.add('rounded-full');
+                overlayContainer.classList.remove('rounded-xl');
+                toggleShapeBtn.innerText = "Make Square";
+            } else {
+                overlayContainer.classList.remove('rounded-full');
+                overlayContainer.classList.add('rounded-xl');
+                toggleShapeBtn.innerText = "Make Circle";
+            }
+        });
+
+        sizeSlider.addEventListener('input', (e) => {
+            overlayContainer.style.width = `${e.target.value}px`;
+            overlayContainer.style.height = `${e.target.value}px`;
+        });
+
+        // Touch Dragging Logic
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        overlayContainer.addEventListener('pointerdown', (e) => {
+            isDragging = true;
+            const rect = overlayContainer.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            overlayContainer.setPointerCapture(e.pointerId);
+        });
+
+        overlayContainer.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            const workspaceRect = workspace.getBoundingClientRect();
+            let newX = e.clientX - workspaceRect.left - offsetX;
+            let newY = e.clientY - workspaceRect.top - offsetY;
+            newX = Math.max(0, Math.min(newX, workspaceRect.width - overlayContainer.offsetWidth));
+            newY = Math.max(0, Math.min(newY, workspaceRect.height - overlayContainer.offsetHeight));
+            overlayContainer.style.left = `${newX}px`;
+            overlayContainer.style.top = `${newY}px`;
+        });
+
+        overlayContainer.addEventListener('pointerup', (e) => {
+            isDragging = false;
+            overlayContainer.releasePointerCapture(e.pointerId);
+        });
+
+        // Save Logic (with Distortion Fix)
+        saveBtn.addEventListener('click', () => {
+            headerText.innerText = "Processing...";
+            
+            const IW = bgImage.naturalWidth;
+            const IH = bgImage.naturalHeight;
+            canvas.width = IW;
+            canvas.height = IH;
+
+            const CW = workspace.clientWidth;
+            const CH = workspace.clientHeight;
+            const CA = CW / CH;
+            const IA = IW / IH;
+            
+            let renderedW, renderedH, renderOffsetX, renderOffsetY;
+            if (CA > IA) { 
+                renderedW = CW; renderedH = CW / IA; renderOffsetX = 0; renderOffsetY = (CH - renderedH) / 2;
+            } else { 
+                renderedH = CH; renderedW = CH * IA; renderOffsetX = (CW - renderedW) / 2; renderOffsetY = 0;
+            }
+
+            const scale = IW / renderedW;
+            ctx.drawImage(bgImage, 0, 0, IW, IH);
+
+            const workspaceRect = workspace.getBoundingClientRect();
+            const overlayRect = overlayContainer.getBoundingClientRect();
+            const domX = overlayRect.left - workspaceRect.left;
+            const domY = overlayRect.top - workspaceRect.top;
+
+            const finalX = (domX - renderOffsetX) * scale;
+            const finalY = (domY - renderOffsetY) * scale;
+            const finalW = overlayRect.width * scale;
+            const finalH = overlayRect.height * scale;
+
+            ctx.save();
+            if (isCircle) {
+                ctx.beginPath();
+                ctx.arc(finalX + finalW/2, finalY + finalH/2, finalW/2, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.clip();
+            } else {
+                const radius = 24 * scale;
+                ctx.beginPath();
+                ctx.moveTo(finalX + radius, finalY);
+                ctx.lineTo(finalX + finalW - radius, finalY);
+                ctx.quadraticCurveTo(finalX + finalW, finalY, finalX + finalW, finalY + radius);
+                ctx.lineTo(finalX + finalW, finalY + finalH - radius);
+                ctx.quadraticCurveTo(finalX + finalW, finalY + finalH, finalX + finalW - radius, finalY + finalH);
+                ctx.lineTo(finalX + radius, finalY + finalH);
+                ctx.quadraticCurveTo(finalX, finalY + finalH, finalX, finalY + finalH - radius);
+                ctx.lineTo(finalX, finalY + radius);
+                ctx.quadraticCurveTo(finalX, finalY, finalX + radius, finalY);
+                ctx.closePath();
+                ctx.clip();
+            }
+
+            const SW = overlayImage.naturalWidth;
+            const SH = overlayImage.naturalHeight;
+            const SA = SW / SH;
+            const TA = finalW / finalH; 
+
+            let sx, sy, sw, sh;
+            if (TA > SA) { sw = SW; sh = SW / TA; sx = 0; sy = (SH - sh) / 2; } 
+            else { sh = SH; sw = SH * TA; sx = (SW - sw) / 2; sy = 0; }
+
+            ctx.drawImage(overlayImage, sx, sy, sw, sh, finalX, finalY, finalW, finalH);
+            
+            ctx.lineWidth = 6 * scale; 
+            ctx.strokeStyle = "white";
+            ctx.stroke();
+            ctx.restore();
+
+            canvas.toBlob((blob) => {
+                if (!blob) return;
+                const file = new File([blob], "solo-travel.jpg", { type: "image/jpeg" });
+                
+                if (navigator.share) {
+                    navigator.share({ title: 'Solo Travel Snap', files: [file] })
+                    .then(() => headerText.innerText = "Step 3: Adjust & Save")
+                    .catch(console.error);
+                } else {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = 'solo-travel.jpg';
+                    document.body.appendChild(a);
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            }, 'image/jpeg', 0.95);
+        });
+    </script>
+</body>
+</html>
