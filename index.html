@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Solo Travel Cam</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* iOS में ज़बरदस्ती स्क्रॉलिंग और टेक्स्ट सेलेक्शन रोकने के लिए */
+        body { overscroll-behavior-y: none; user-select: none; -webkit-user-select: none; }
+        /* वीडियो कंट्रोल्स को पूरी तरह ब्लॉक करने के लिए */
+        video::-webkit-media-controls { display: none !important; }
+        video { pointer-events: none; } 
+    </style>
+</head>
+<body class="bg-gray-900 text-white h-screen w-screen overflow-hidden flex flex-col">
+
+    <!-- Header / Status -->
+    <div class="text-center p-4 text-lg font-bold bg-black shadow-md z-10" id="headerText">
+        Step 1: Capture Monument (Back Camera)
+    </div>
+
+    <!-- Main Working Area -->
+    <div class="relative flex-grow w-full h-full flex items-center justify-center bg-black overflow-hidden" id="workspace">
+        
+        <!-- Live Camera Feed -->
+        <video id="cameraFeed" class="absolute w-full h-full object-cover" autoplay playsinline muted disablePictureInPicture></video>
+        
+        <!-- Editor View (Hidden initially) -->
+        <div id="editorView" class="relative w-full h-full hidden">
+            <!-- Background Image -->
+            <img id="bgImage" class="absolute w-full h-full object-cover" src="" alt="Background">
+            
+            <!-- Draggable Overlay Image (Selfie) -->
+            <div id="overlayContainer" class="absolute top-4 left-4 w-32 h-32 border-2 border-white shadow-xl touch-none rounded-full overflow-hidden" style="touch-action: none;">
+                <img id="overlayImage" class="w-full h-full object-cover" src="" alt="Selfie">
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="bg-black p-6 pb-10 flex justify-center items-center gap-4 z-10" id="controlsArea">
+        <!-- Capture Button -->
+        <button id="captureBtn" class="bg-white text-black w-16 h-16 rounded-full border-4 border-gray-400 focus:outline-none shadow-lg active:scale-95 transition-transform"></button>
+        
+        <!-- Editor Controls (Hidden initially) -->
+        <div id="editorControls" class="hidden w-full flex justify-between items-center px-4">
+            <button id="toggleShapeBtn" class="bg-gray-700 text-white px-4 py-2 rounded-lg">Make Square</button>
+            <button id="saveBtn" class="bg-blue-600 font-bold text-white px-6 py-2 rounded-lg">Save / Share</button>
+            <button id="retakeBtn" class="bg-red-600 text-white px-4 py-2 rounded-lg">Retake</button>
+        </div>
+    </div>
+
+    <!-- Hidden Canvas for Processing -->
+    <canvas id="canvas" class="hidden"></canvas>
+
+    <script>
+        const video = document.getElementById('cameraFeed');
+        const captureBtn = document.getElementById('captureBtn');
+        const headerText = document.getElementById('headerText');
+        const editorView = document.getElementById('editorView');
+        const bgImage = document.getElementById('bgImage');
+        const overlayContainer = document.getElementById('overlayContainer');
+        const overlayImage = document.getElementById('overlayImage');
+        const editorControls = document.getElementById('editorControls');
+        const toggleShapeBtn = document.getElementById('toggleShapeBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const retakeBtn = document.getElementById('retakeBtn');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const workspace = document.getElementById('workspace');
+
+        let currentStream = null;
+        let step = 1; // 1: Back, 2: Front, 3: Editor
+        let isCircle = true;
+
+        // Start Camera Function
+        async function startCamera(facingMode) {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                currentStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+                    audio: false
+                });
+                video.srcObject = currentStream;
+            } catch (err) {
+                alert("Camera access denied or failed: " + err.message);
+            }
+        }
+
+        // Initialize with Back Camera
+        startCamera('environment');
+
+        // Capture Logic
+        captureBtn.addEventListener('click', () => {
+            // Set canvas size to video size
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+            if (step === 1) {
+                // Background captured, switch to front camera
+                bgImage.src = imageDataUrl;
+                step = 2;
+                headerText.innerText = "Step 2: Capture Selfie (Front Camera)";
+                startCamera('user');
+            } else if (step === 2) {
+                // Selfie captured, move to editor
+                overlayImage.src = imageDataUrl;
+                step = 3;
+                
+                // Stop camera
+                if (currentStream) currentStream.getTracks().forEach(track => track.stop());
+                
+                // UI changes
+                video.classList.add('hidden');
+                captureBtn.classList.add('hidden');
+                editorView.classList.remove('hidden');
+                editorControls.classList.remove('hidden');
+                headerText.innerText = "Step 3: Adjust & Save";
+            }
+        });
+
+        // Retake Logic
+        retakeBtn.addEventListener('click', () => {
+            step = 1;
+            editorView.classList.add('hidden');
+            editorControls.classList.add('hidden');
+            video.classList.remove('hidden');
+            captureBtn.classList.remove('hidden');
+            headerText.innerText = "Step 1: Capture Monument (Back Camera)";
+            startCamera('environment');
+        });
+
+        // Toggle Shape Logic (Circle/Square)
+        toggleShapeBtn.addEventListener('click', () => {
+            isCircle = !isCircle;
+            if (isCircle) {
+                overlayContainer.classList.add('rounded-full');
+                toggleShapeBtn.innerText = "Make Square";
+            } else {
+                overlayContainer.classList.remove('rounded-full');
+                overlayContainer.classList.add('rounded-lg');
+                toggleShapeBtn.innerText = "Make Circle";
+            }
+        });
+
+        // Dragging Logic for Overlay (Works on Touch/iOS)
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        overlayContainer.addEventListener('pointerdown', (e) => {
+            isDragging = true;
+            const rect = overlayContainer.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            overlayContainer.setPointerCapture(e.pointerId);
+        });
+
+        overlayContainer.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            const workspaceRect = workspace.getBoundingClientRect();
+            
+            // Calculate new positions, keeping it within bounds
+            let newX = e.clientX - workspaceRect.left - offsetX;
+            let newY = e.clientY - workspaceRect.top - offsetY;
+
+            // Boundaries
+            newX = Math.max(0, Math.min(newX, workspaceRect.width - overlayContainer.offsetWidth));
+            newY = Math.max(0, Math.min(newY, workspaceRect.height - overlayContainer.offsetHeight));
+
+            overlayContainer.style.left = `${newX}px`;
+            overlayContainer.style.top = `${newY}px`;
+        });
+
+        overlayContainer.addEventListener('pointerup', (e) => {
+            isDragging = false;
+            overlayContainer.releasePointerCapture(e.pointerId);
+        });
+
+        // Final Save / Export Logic (iOS friendly)
+        saveBtn.addEventListener('click', () => {
+            headerText.innerText = "Processing...";
+            
+            // Render background first
+            canvas.width = bgImage.naturalWidth;
+            canvas.height = bgImage.naturalHeight;
+            ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+
+            // Calculate overlay position relative to original image size
+            const workspaceRect = workspace.getBoundingClientRect();
+            const bgRect = bgImage.getBoundingClientRect();
+            const overlayRect = overlayContainer.getBoundingClientRect();
+
+            // Ratios to map DOM position to actual image pixels
+            const scaleX = canvas.width / bgRect.width;
+            const scaleY = canvas.height / bgRect.height;
+
+            const finalOverlayWidth = overlayRect.width * scaleX;
+            const finalOverlayHeight = overlayRect.height * scaleY;
+            const finalX = (overlayRect.left - bgRect.left) * scaleX;
+            const finalY = (overlayRect.top - bgRect.top) * scaleY;
+
+            // Draw Overlay
+            ctx.save();
+            if (isCircle) {
+                ctx.beginPath();
+                ctx.arc(finalX + finalOverlayWidth/2, finalY + finalOverlayHeight/2, finalOverlayWidth/2, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.clip();
+            }
+            
+            // Draw selfie image
+            ctx.drawImage(overlayImage, finalX, finalY, finalOverlayWidth, finalOverlayHeight);
+            
+            // Draw border
+            ctx.lineWidth = 10 * scaleX; // Scale border thickness
+            ctx.strokeStyle = "white";
+            ctx.stroke();
+            ctx.restore();
+
+            // Export logic - using Blob for iOS Web Share API
+            canvas.toBlob((blob) => {
+                if (!blob) { alert("Error processing image."); return; }
+                
+                const file = new File([blob], "solo-travel.jpg", { type: "image/jpeg" });
+                
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Solo Travel Snap',
+                        files: [file]
+                    }).then(() => {
+                        headerText.innerText = "Step 3: Adjust & Save";
+                    }).catch((err) => {
+                        console.log("Share skipped/failed", err);
+                        fallbackDownload(blob);
+                    });
+                } else {
+                    fallbackDownload(blob);
+                }
+            }, 'image/jpeg', 0.95);
+        });
+
+        function fallbackDownload(blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'solo-travel.jpg';
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            headerText.innerText = "Downloaded!";
+        }
+    </script>
+</body>
+</html>
