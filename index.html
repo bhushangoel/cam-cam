@@ -13,11 +13,11 @@
 </head>
 <body class="bg-gray-900 text-white h-screen w-screen overflow-hidden flex flex-col">
 
-    <!-- Top Bar: Status & Resolution -->
+    <!-- Top Bar -->
     <div class="flex justify-between items-center p-3 bg-black shadow-md z-20" id="topBar">
         <div class="text-sm font-bold" id="headerText">Step 1: Back Camera</div>
         
-        <!-- Resolution Selector (Visible only in Step 1) -->
+        <!-- Resolution Selector -->
         <select id="resSelect" class="bg-gray-800 text-white text-xs px-2 py-1 rounded border border-gray-600 outline-none">
             <option value="1080">1080p (FHD)</option>
             <option value="720">720p (HD)</option>
@@ -25,18 +25,16 @@
         </select>
     </div>
 
-    <!-- Main Working Area -->
+    <!-- Main Workspace -->
     <div class="relative flex-grow w-full h-full flex items-center justify-center bg-black overflow-hidden" id="workspace">
         
-        <!-- Live Camera Feed -->
+        <!-- Live Camera -->
         <video id="cameraFeed" class="absolute w-full h-full object-cover" autoplay playsinline muted disablePictureInPicture></video>
         
-        <!-- Editor View (Hidden initially) -->
+        <!-- Editor View -->
         <div id="editorView" class="relative w-full h-full hidden">
-            <!-- Background Image -->
             <img id="bgImage" class="absolute w-full h-full object-cover" src="" alt="Background">
             
-            <!-- Draggable & Resizable Overlay Image (Selfie) -->
             <div id="overlayContainer" class="absolute top-8 left-8 w-32 h-32 border-[3px] border-white shadow-2xl touch-none rounded-full overflow-hidden flex items-center justify-center bg-black" style="touch-action: none;">
                 <img id="overlayImage" class="w-full h-full object-cover" src="" alt="Selfie">
             </div>
@@ -45,13 +43,9 @@
 
     <!-- Controls Area -->
     <div class="bg-black p-4 pb-8 flex flex-col justify-center items-center z-20 gap-4" id="controlsArea">
-        
-        <!-- Capture Button for Camera -->
         <button id="captureBtn" class="bg-white text-black w-16 h-16 rounded-full border-4 border-gray-400 focus:outline-none shadow-lg active:scale-95 transition-transform"></button>
         
-        <!-- Editor Controls (Hidden initially) -->
         <div id="editorControls" class="hidden w-full flex flex-col gap-4 px-2">
-            
             <!-- Resize Slider -->
             <div class="flex items-center justify-between gap-3 bg-gray-800 p-2 rounded-lg">
                 <span class="text-xs text-gray-300">Size</span>
@@ -67,7 +61,6 @@
         </div>
     </div>
 
-    <!-- Hidden Canvas for Processing -->
     <canvas id="canvas" class="hidden"></canvas>
 
     <script>
@@ -91,47 +84,50 @@
         let currentStream = null;
         let step = 1; 
         let isCircle = true;
-        let facingMode = 'environment'; // default back camera
+        let facingMode = 'environment';
 
-        // Get Resolution Constraints
-        function getConstraints(mode) {
-            const heightTarget = parseInt(resSelect.value); // 720, 1080, 2160
-            // For mobile, width/height is often flipped (portrait orientation)
-            // Using 'ideal' lets iOS fallback to nearest supported resolution if 4K isn't available
-            return {
-                video: {
-                    facingMode: mode,
-                    height: { ideal: heightTarget }
-                },
-                audio: false
-            };
-        }
-
-        // Start Camera Function
         async function startCamera(mode) {
             facingMode = mode;
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
+
+            const res = parseInt(resSelect.value);
+            let constraints = { video: { facingMode: mode }, audio: false };
+            
+            if (res === 2160) { constraints.video.width = { ideal: 3840 }; constraints.video.height = { ideal: 2160 }; }
+            else if (res === 1080) { constraints.video.width = { ideal: 1920 }; constraints.video.height = { ideal: 1080 }; }
+            else { constraints.video.width = { ideal: 1280 }; constraints.video.height = { ideal: 720 }; }
+
             try {
-                currentStream = await navigator.mediaDevices.getUserMedia(getConstraints(mode));
-                video.srcObject = currentStream;
+                // पहले हाई रिज़ॉल्यूशन ट्राई करेगा
+                currentStream = await navigator.mediaDevices.getUserMedia(constraints);
             } catch (err) {
-                alert("Camera access issue: " + err.message);
+                console.warn("High Res failed, falling back to default camera...");
+                try {
+                    // अगर हाई रिज़ॉल्यूशन फेल हुआ (iOS में आम है), तो नॉर्मल कैमरा खोल देगा
+                    currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: false });
+                } catch (fallbackErr) {
+                    alert("Camera access denied! Please check settings.");
+                    return;
+                }
             }
+
+            video.srcObject = currentStream;
+            video.muted = true; // iOS Safari fix
+            
+            // ज़बरदस्ती प्ले करवाना (ताकि ब्लैक स्क्रीन न रहे)
+            video.play().catch(e => console.error("Auto-play prevented", e));
         }
 
-        // Handle Resolution Change
         resSelect.addEventListener('change', () => {
             if (step === 1) startCamera('environment');
         });
 
-        // Initialize
+        // App Start
         startCamera('environment');
 
-        // Capture Logic
         captureBtn.addEventListener('click', () => {
-            // Match canvas to exact video track dimensions to avoid distortion
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -142,58 +138,4 @@
                 bgImage.src = imageDataUrl;
                 step = 2;
                 headerText.innerText = "Step 2: Front Camera";
-                resSelect.classList.add('hidden'); // Hide resolution dropdown
-                startCamera('user');
-            } else if (step === 2) {
-                overlayImage.src = imageDataUrl;
-                step = 3;
-                
-                if (currentStream) currentStream.getTracks().forEach(track => track.stop());
-                
-                video.classList.add('hidden');
-                captureBtn.classList.add('hidden');
-                editorView.classList.remove('hidden');
-                editorControls.classList.remove('hidden');
-                headerText.innerText = "Step 3: Adjust & Save";
-            }
-        });
-
-        // Retake Logic
-        retakeBtn.addEventListener('click', () => {
-            step = 1;
-            editorView.classList.add('hidden');
-            editorControls.classList.add('hidden');
-            video.classList.remove('hidden');
-            captureBtn.classList.remove('hidden');
-            resSelect.classList.remove('hidden');
-            headerText.innerText = "Step 1: Back Camera";
-            startCamera('environment');
-        });
-
-        // Toggle Shape
-        toggleShapeBtn.addEventListener('click', () => {
-            isCircle = !isCircle;
-            if (isCircle) {
-                overlayContainer.classList.add('rounded-full');
-                overlayContainer.classList.remove('rounded-xl');
-                toggleShapeBtn.innerText = "Make Square";
-            } else {
-                overlayContainer.classList.remove('rounded-full');
-                overlayContainer.classList.add('rounded-xl');
-                toggleShapeBtn.innerText = "Make Circle";
-            }
-        });
-
-        // Resize Overlay Logic
-        sizeSlider.addEventListener('input', (e) => {
-            const size = e.target.value;
-            overlayContainer.style.width = `${size}px`;
-            overlayContainer.style.height = `${size}px`;
-        });
-
-        // Dragging Logic (PointerEvents for smooth iOS touch)
-        let isDragging = false;
-        let offsetX, offsetY;
-
-        overlayContainer.addEventListener('pointerdown', (e) => {
-            isDragging = true;
+                resSelect.classList.add('hidden');
