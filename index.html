@@ -3,21 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Solo Travel Cam</title>
+    <title>Solo Travel Cam Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* iOS में ज़बरदस्ती स्क्रॉलिंग और टेक्स्ट सेलेक्शन रोकने के लिए */
         body { overscroll-behavior-y: none; user-select: none; -webkit-user-select: none; }
-        /* वीडियो कंट्रोल्स को पूरी तरह ब्लॉक करने के लिए */
         video::-webkit-media-controls { display: none !important; }
         video { pointer-events: none; } 
     </style>
 </head>
 <body class="bg-gray-900 text-white h-screen w-screen overflow-hidden flex flex-col">
 
-    <!-- Header / Status -->
-    <div class="text-center p-4 text-lg font-bold bg-black shadow-md z-10" id="headerText">
-        Step 1: Capture Monument (Back Camera)
+    <!-- Top Bar: Status & Resolution -->
+    <div class="flex justify-between items-center p-3 bg-black shadow-md z-20" id="topBar">
+        <div class="text-sm font-bold" id="headerText">Step 1: Back Camera</div>
+        
+        <!-- Resolution Selector (Visible only in Step 1) -->
+        <select id="resSelect" class="bg-gray-800 text-white text-xs px-2 py-1 rounded border border-gray-600 outline-none">
+            <option value="1080">1080p (FHD)</option>
+            <option value="720">720p (HD)</option>
+            <option value="2160">4K (UHD)</option>
+        </select>
     </div>
 
     <!-- Main Working Area -->
@@ -31,23 +36,34 @@
             <!-- Background Image -->
             <img id="bgImage" class="absolute w-full h-full object-cover" src="" alt="Background">
             
-            <!-- Draggable Overlay Image (Selfie) -->
-            <div id="overlayContainer" class="absolute top-4 left-4 w-32 h-32 border-2 border-white shadow-xl touch-none rounded-full overflow-hidden" style="touch-action: none;">
+            <!-- Draggable & Resizable Overlay Image (Selfie) -->
+            <div id="overlayContainer" class="absolute top-8 left-8 w-32 h-32 border-[3px] border-white shadow-2xl touch-none rounded-full overflow-hidden flex items-center justify-center bg-black" style="touch-action: none;">
                 <img id="overlayImage" class="w-full h-full object-cover" src="" alt="Selfie">
             </div>
         </div>
     </div>
 
-    <!-- Controls -->
-    <div class="bg-black p-6 pb-10 flex justify-center items-center gap-4 z-10" id="controlsArea">
-        <!-- Capture Button -->
+    <!-- Controls Area -->
+    <div class="bg-black p-4 pb-8 flex flex-col justify-center items-center z-20 gap-4" id="controlsArea">
+        
+        <!-- Capture Button for Camera -->
         <button id="captureBtn" class="bg-white text-black w-16 h-16 rounded-full border-4 border-gray-400 focus:outline-none shadow-lg active:scale-95 transition-transform"></button>
         
         <!-- Editor Controls (Hidden initially) -->
-        <div id="editorControls" class="hidden w-full flex justify-between items-center px-4">
-            <button id="toggleShapeBtn" class="bg-gray-700 text-white px-4 py-2 rounded-lg">Make Square</button>
-            <button id="saveBtn" class="bg-blue-600 font-bold text-white px-6 py-2 rounded-lg">Save / Share</button>
-            <button id="retakeBtn" class="bg-red-600 text-white px-4 py-2 rounded-lg">Retake</button>
+        <div id="editorControls" class="hidden w-full flex flex-col gap-4 px-2">
+            
+            <!-- Resize Slider -->
+            <div class="flex items-center justify-between gap-3 bg-gray-800 p-2 rounded-lg">
+                <span class="text-xs text-gray-300">Size</span>
+                <input type="range" id="sizeSlider" min="60" max="250" value="128" class="flex-grow accent-blue-500">
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex justify-between items-center w-full gap-2">
+                <button id="toggleShapeBtn" class="bg-gray-700 text-xs text-white px-3 py-3 rounded-lg flex-1 font-semibold">Make Square</button>
+                <button id="saveBtn" class="bg-blue-600 text-sm font-bold text-white px-4 py-3 rounded-lg flex-1 shadow-lg active:bg-blue-700">Save</button>
+                <button id="retakeBtn" class="bg-red-600 text-xs text-white px-3 py-3 rounded-lg flex-1 font-semibold">Retake</button>
+            </div>
         </div>
     </div>
 
@@ -66,57 +82,74 @@
         const toggleShapeBtn = document.getElementById('toggleShapeBtn');
         const saveBtn = document.getElementById('saveBtn');
         const retakeBtn = document.getElementById('retakeBtn');
+        const resSelect = document.getElementById('resSelect');
+        const sizeSlider = document.getElementById('sizeSlider');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const workspace = document.getElementById('workspace');
 
         let currentStream = null;
-        let step = 1; // 1: Back, 2: Front, 3: Editor
+        let step = 1; 
         let isCircle = true;
+        let facingMode = 'environment'; // default back camera
+
+        // Get Resolution Constraints
+        function getConstraints(mode) {
+            const heightTarget = parseInt(resSelect.value); // 720, 1080, 2160
+            // For mobile, width/height is often flipped (portrait orientation)
+            // Using 'ideal' lets iOS fallback to nearest supported resolution if 4K isn't available
+            return {
+                video: {
+                    facingMode: mode,
+                    height: { ideal: heightTarget }
+                },
+                audio: false
+            };
+        }
 
         // Start Camera Function
-        async function startCamera(facingMode) {
+        async function startCamera(mode) {
+            facingMode = mode;
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
             try {
-                currentStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
-                    audio: false
-                });
+                currentStream = await navigator.mediaDevices.getUserMedia(getConstraints(mode));
                 video.srcObject = currentStream;
             } catch (err) {
-                alert("Camera access denied or failed: " + err.message);
+                alert("Camera access issue: " + err.message);
             }
         }
 
-        // Initialize with Back Camera
+        // Handle Resolution Change
+        resSelect.addEventListener('change', () => {
+            if (step === 1) startCamera('environment');
+        });
+
+        // Initialize
         startCamera('environment');
 
         // Capture Logic
         captureBtn.addEventListener('click', () => {
-            // Set canvas size to video size
+            // Match canvas to exact video track dimensions to avoid distortion
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
             if (step === 1) {
-                // Background captured, switch to front camera
                 bgImage.src = imageDataUrl;
                 step = 2;
-                headerText.innerText = "Step 2: Capture Selfie (Front Camera)";
+                headerText.innerText = "Step 2: Front Camera";
+                resSelect.classList.add('hidden'); // Hide resolution dropdown
                 startCamera('user');
             } else if (step === 2) {
-                // Selfie captured, move to editor
                 overlayImage.src = imageDataUrl;
                 step = 3;
                 
-                // Stop camera
                 if (currentStream) currentStream.getTracks().forEach(track => track.stop());
                 
-                // UI changes
                 video.classList.add('hidden');
                 captureBtn.classList.add('hidden');
                 editorView.classList.remove('hidden');
@@ -132,130 +165,35 @@
             editorControls.classList.add('hidden');
             video.classList.remove('hidden');
             captureBtn.classList.remove('hidden');
-            headerText.innerText = "Step 1: Capture Monument (Back Camera)";
+            resSelect.classList.remove('hidden');
+            headerText.innerText = "Step 1: Back Camera";
             startCamera('environment');
         });
 
-        // Toggle Shape Logic (Circle/Square)
+        // Toggle Shape
         toggleShapeBtn.addEventListener('click', () => {
             isCircle = !isCircle;
             if (isCircle) {
                 overlayContainer.classList.add('rounded-full');
+                overlayContainer.classList.remove('rounded-xl');
                 toggleShapeBtn.innerText = "Make Square";
             } else {
                 overlayContainer.classList.remove('rounded-full');
-                overlayContainer.classList.add('rounded-lg');
+                overlayContainer.classList.add('rounded-xl');
                 toggleShapeBtn.innerText = "Make Circle";
             }
         });
 
-        // Dragging Logic for Overlay (Works on Touch/iOS)
+        // Resize Overlay Logic
+        sizeSlider.addEventListener('input', (e) => {
+            const size = e.target.value;
+            overlayContainer.style.width = `${size}px`;
+            overlayContainer.style.height = `${size}px`;
+        });
+
+        // Dragging Logic (PointerEvents for smooth iOS touch)
         let isDragging = false;
         let offsetX, offsetY;
 
         overlayContainer.addEventListener('pointerdown', (e) => {
             isDragging = true;
-            const rect = overlayContainer.getBoundingClientRect();
-            offsetX = e.clientX - rect.left;
-            offsetY = e.clientY - rect.top;
-            overlayContainer.setPointerCapture(e.pointerId);
-        });
-
-        overlayContainer.addEventListener('pointermove', (e) => {
-            if (!isDragging) return;
-            const workspaceRect = workspace.getBoundingClientRect();
-            
-            // Calculate new positions, keeping it within bounds
-            let newX = e.clientX - workspaceRect.left - offsetX;
-            let newY = e.clientY - workspaceRect.top - offsetY;
-
-            // Boundaries
-            newX = Math.max(0, Math.min(newX, workspaceRect.width - overlayContainer.offsetWidth));
-            newY = Math.max(0, Math.min(newY, workspaceRect.height - overlayContainer.offsetHeight));
-
-            overlayContainer.style.left = `${newX}px`;
-            overlayContainer.style.top = `${newY}px`;
-        });
-
-        overlayContainer.addEventListener('pointerup', (e) => {
-            isDragging = false;
-            overlayContainer.releasePointerCapture(e.pointerId);
-        });
-
-        // Final Save / Export Logic (iOS friendly)
-        saveBtn.addEventListener('click', () => {
-            headerText.innerText = "Processing...";
-            
-            // Render background first
-            canvas.width = bgImage.naturalWidth;
-            canvas.height = bgImage.naturalHeight;
-            ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
-
-            // Calculate overlay position relative to original image size
-            const workspaceRect = workspace.getBoundingClientRect();
-            const bgRect = bgImage.getBoundingClientRect();
-            const overlayRect = overlayContainer.getBoundingClientRect();
-
-            // Ratios to map DOM position to actual image pixels
-            const scaleX = canvas.width / bgRect.width;
-            const scaleY = canvas.height / bgRect.height;
-
-            const finalOverlayWidth = overlayRect.width * scaleX;
-            const finalOverlayHeight = overlayRect.height * scaleY;
-            const finalX = (overlayRect.left - bgRect.left) * scaleX;
-            const finalY = (overlayRect.top - bgRect.top) * scaleY;
-
-            // Draw Overlay
-            ctx.save();
-            if (isCircle) {
-                ctx.beginPath();
-                ctx.arc(finalX + finalOverlayWidth/2, finalY + finalOverlayHeight/2, finalOverlayWidth/2, 0, Math.PI * 2);
-                ctx.closePath();
-                ctx.clip();
-            }
-            
-            // Draw selfie image
-            ctx.drawImage(overlayImage, finalX, finalY, finalOverlayWidth, finalOverlayHeight);
-            
-            // Draw border
-            ctx.lineWidth = 10 * scaleX; // Scale border thickness
-            ctx.strokeStyle = "white";
-            ctx.stroke();
-            ctx.restore();
-
-            // Export logic - using Blob for iOS Web Share API
-            canvas.toBlob((blob) => {
-                if (!blob) { alert("Error processing image."); return; }
-                
-                const file = new File([blob], "solo-travel.jpg", { type: "image/jpeg" });
-                
-                if (navigator.share) {
-                    navigator.share({
-                        title: 'Solo Travel Snap',
-                        files: [file]
-                    }).then(() => {
-                        headerText.innerText = "Step 3: Adjust & Save";
-                    }).catch((err) => {
-                        console.log("Share skipped/failed", err);
-                        fallbackDownload(blob);
-                    });
-                } else {
-                    fallbackDownload(blob);
-                }
-            }, 'image/jpeg', 0.95);
-        });
-
-        function fallbackDownload(blob) {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = 'solo-travel.jpg';
-            document.body.appendChild(a);
-            a.click();
-            URL.revokeObjectURL(url);
-            headerText.innerText = "Downloaded!";
-        }
-    </script>
-</body>
-</html>
